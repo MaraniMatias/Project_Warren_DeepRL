@@ -1,0 +1,14 @@
+# Source Data
+/GAF/**
+/polar/**
+
+# Some exceptions to get it runing out-of-the-box
+!**/a.us.png
+!**/aa.us.png
+!**/aaap.us.png
+!**/aaba.us.png
+!**/aac.us.png
+!**/aal.us.png
+!**/aamc.us.png
+!**/aame.us.png
+!**/aan.us.png
