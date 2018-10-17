@@ -1,7 +1,42 @@
 # Source Data
-/data/*
+/data/**
+
+# Some exceptions to get it runing out-of-the-box
+!/data/Stocks/a.us.txt
+!/data/Stocks/aa.us.txt
+!/data/Stocks/aaap.us.txt
+!/data/Stocks/aaba.us.txt
+!/data/Stocks/aac.us.txt
+!/data/Stocks/aal.us.txt
+!/data/Stocks/aamc.us.txt
+!/data/Stocks/aame.us.txt
+!/data/Stocks/aan.us.txt
+
+
 # Resulting Images
-/result_images/*
+/result_images/**
+
+# Some exceptions to get it runing out-of-the-box
+#polar
+!/result_images/polar/a.us.png
+!/result_images/polar/aa.us.png
+!/result_images/polar/aaap.us.png
+!/result_images/polar/aaba.us.png
+!/result_images/polar/aac.us.png
+!/result_images/polar/aal.us.png
+!/result_images/polar/aamc.us.png
+!/result_images/polar/aame.us.png
+!/result_images/polar/aan.us.png
+#GAF
+!/result_images/GAF/a.us.png
+!/result_images/GAF/aa.us.png
+!/result_images/GAF/aaap.us.png
+!/result_images/GAF/aaba.us.png
+!/result_images/GAF/aac.us.png
+!/result_images/GAF/aal.us.png
+!/result_images/GAF/aamc.us.png
+!/result_images/GAF/aame.us.png
+!/result_images/GAF/aan.us.png
 
 # Ignore LaTeX project files
 /paper/*.aux
