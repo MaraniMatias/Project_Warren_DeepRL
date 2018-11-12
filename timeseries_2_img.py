@@ -1,10 +1,11 @@
+import glob
+import math
 import os
 import sys
-import math
+
+import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-import numpy as np
-import glob
 
 
 def tabulate(x, y, f):
