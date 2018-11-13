@@ -1,9 +1,11 @@
-import os
+import glob
 import math
+import os
+import sys
+
+import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-import numpy as np
-import glob
 
 
 def tabulate(x, y, f):
@@ -38,6 +40,34 @@ def gramian_angular_field(series):
     return gaf, phi, r, scaled_series
 
 
+# Show a progress bar
+def updateProgress(progress, tick="", total="", status="Loading..."):
+    lineLength = 80
+    barLength = 23
+    if isinstance(progress, int):
+        progress = float(progress)
+    if progress < 0:
+        progress = 0
+        status = "Waiting...\r"
+    if progress >= 1:
+        progress = 1
+        status = "Completed loading data\r\n"
+    block = int(round(barLength * progress))
+    line = str("\rImage: {0}/{1} [{2}] {3}% {4}").format(
+        tick,
+        total,
+        str(("#" * block)) + str("." * (barLength - block)),
+        round(progress * 100, 1),
+        status,
+    )
+    emptyBlock = lineLength - len(line)
+    emptyBlock = " " * emptyBlock if emptyBlock > 0 else ""
+    sys.stdout.write(line + emptyBlock)
+    sys.stdout.flush()
+    if progress == 1:
+        print("")
+
+
 __location__ = os.path.join(os.getcwd(), 'Data', 'Stocks', '*.txt')
 if not os.path.exists(os.path.join('result_images', 'polar')):
     os.makedirs(os.path.join('result_images', 'polar'))
@@ -52,8 +82,16 @@ font = {
     'size': 16,
 }
 
+# to keep track of what's been worked on
+total_files = len(os.listdir(os.path.dirname(__location__)))
+i = 0
+
 # for each file in folder
 for fname in glob.glob(__location__):
+
+    # Update the progress bar
+    progress = float(i / total_files), (i + 1)
+    updateProgress(progress[0], progress[1], total_files, os.path.basename(fname))
 
     # check that file is not empty
     if os.stat(fname).st_size != 0:
@@ -94,3 +132,7 @@ for fname in glob.glob(__location__):
         # SAVE RESULTS
         plt.savefig(os.path.join(os.getcwd(), 'result_images', 'GAF', os.path.basename(fname).replace('txt', 'png')),
                     bbox_inches='tight')
+
+    i = i + 1
+
+updateProgress(1, total_files, total_files, os.path.basename(fname))
