@@ -3,7 +3,10 @@ import os
 import sys
 
 import pandas as pd
+import numpy as np
 
+# Rows to divide each csv file
+N_ROWS = 10
 
 def maxima_minima(row):
     if not pd.isna(row['min']):
@@ -59,28 +62,34 @@ for fname in glob.glob(__location__):
 
     # check that file is not empty
     if os.stat(fname).st_size != 0:
+
         # reading the source csv
-        df = pd.read_csv(fname, header=0, parse_dates=[0], index_col=[0])
+        dfTotal = pd.read_csv(fname, header=0, parse_dates=[0], index_col=[0])
+        # dividing csv into chunks
+        listOfChunks = np.array_split(dfTotal, N_ROWS)
+        # for each chunk creates a new csv file
+        for idx, l in enumerate(listOfChunks):
 
-        # calculating local minima and maxima
-        df['min'] = df.Close[
-            (df.Close.shift(1) > df.Close) & (df.Close.shift(-1) > df.Close)]
-        df['max'] = df.Close[
-            (df.Close.shift(1) < df.Close) & (df.Close.shift(-1) < df.Close)]
-        # # Plot results
-        # plt.scatter(df.loc['2000-01-01': '2001-01-01'].index, df.loc['2000-01-01': '2001-01-01']['min'], c='r')
-        # plt.scatter(df.loc['2000-01-01': '2001-01-01'].index, df.loc['2000-01-01': '2001-01-01']['max'], c='g')
-        # df.loc['2000-01-01': '2001-01-01'].Close.plot()
-        # plt.show()
+            df = pd.DataFrame(l)
+            # calculating local minima and maxima
+            df['min'] = df.Close[
+                (df.Close.shift(1) > df.Close) & (df.Close.shift(-1) > df.Close)]
+            df['max'] = df.Close[
+                (df.Close.shift(1) < df.Close) & (df.Close.shift(-1) < df.Close)]
+            # # Plot results
+            # plt.scatter(df.loc['2000-01-01': '2001-01-01'].index, df.loc['2000-01-01': '2001-01-01']['min'], c='r')
+            # plt.scatter(df.loc['2000-01-01': '2001-01-01'].index, df.loc['2000-01-01': '2001-01-01']['max'], c='g')
+            # df.loc['2000-01-01': '2001-01-01'].Close.plot()
+            # plt.show()
 
-        # calculating the action column based on minima and maximas
-        df['Action'] = df.apply(lambda row: maxima_minima(row), axis=1)
+            # calculating the action column based on minima and maximas
+            df['Action'] = df.apply(lambda row: maxima_minima(row), axis=1)
 
-        # dropping unnecesary columns
-        df = df.drop(['min', 'max'], axis=1)
+            # dropping unnecesary columns
+            df = df.drop(['min', 'max'], axis=1)
 
-        # saving results
-        df.to_csv(os.path.join(os.getcwd(), 'augmented_data', 'Stocks', os.path.basename(fname)))
+            # saving results
+            df.to_csv(os.path.join(os.getcwd(), 'augmented_data', 'Stocks', 'n'+str(idx)+'_'+os.path.basename(fname)))
     i = i + 1
 
 updateProgress(1, total_files, total_files, os.path.basename(fname))

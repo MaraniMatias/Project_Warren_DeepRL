@@ -68,7 +68,7 @@ def updateProgress(progress, tick="", total="", status="Loading..."):
         print("")
 
 
-__location__ = os.path.join(os.getcwd(), 'Data', 'Stocks', '*.txt')
+__location__ = os.path.join(os.getcwd(), 'augmented_data', 'Stocks', '*.txt')
 if not os.path.exists(os.path.join('result_images', 'polar')):
     os.makedirs(os.path.join('result_images', 'polar'))
 if not os.path.exists(os.path.join('result_images', 'GAF')):
