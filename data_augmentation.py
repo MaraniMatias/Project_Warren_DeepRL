@@ -51,18 +51,23 @@ def updateProgress(progress, tick="", total="", status="Loading..."):
         print("")
 
 
-__location__ = os.path.join(os.getcwd(), 'Data', 'Stocks', '*.txt')
+# making sure writing directories exist
 if not os.path.exists(os.path.join('augmented_data', 'Stocks')):
     os.makedirs(os.path.join('augmented_data', 'Stocks'))
 if not os.path.exists(os.path.join('augmented_data', 'Labels')):
     os.makedirs(os.path.join('augmented_data', 'Labels'))
 
+# setting read/write directory locations
+__source_loc_ = os.path.join(os.getcwd(), 'Data', 'Stocks', '*.txt')
+__write_root_loc__ = os.path.join(os.getcwd(), 'augmented_data', 'Stocks')
+
 # to keep track of what's been worked on
-total_files = len(os.listdir(os.path.dirname(__location__)))
+total_files = len(os.listdir(os.path.dirname(__source_loc_)))
 
 # for each file in folder
-for i_originFile, fname in enumerate(glob.glob(__location__)):
-
+for i_originFile, fname in enumerate(glob.glob(__source_loc_)):
+    if not os.path.exists(os.path.join('augmented_data', 'Stocks', os.path.basename(fname).replace(".txt", ""))):
+        os.makedirs(os.path.join('augmented_data', 'Stocks', os.path.basename(fname).replace(".txt", "")))
     # Update the progress bar
     progress = float(i_originFile / total_files), (i_originFile + 1)
     updateProgress(progress[0], progress[1], total_files, os.path.basename(fname))
@@ -104,12 +109,13 @@ for i_originFile, fname in enumerate(glob.glob(__location__)):
             # generating sub file
             sub_df = sliced_df.iloc[fromRow:toRow].copy()
             sub_df.to_csv(
-                os.path.join(os.getcwd(), 'augmented_data', 'Stocks', str(i_subFile) + "_" + os.path.basename(fname)))
+                os.path.join(__write_root_loc__, os.path.basename(fname).replace(".txt", ""),
+                             str(i_subFile) + "." + os.path.basename(fname)))
 
             # saving id and labels
             files_index.loc[fromRow] = [os.path.basename(
-                os.path.join(os.getcwd(), 'augmented_data', 'Stocks',
-                             str(i_subFile) + "_" + os.path.basename(fname).replace(".txt", ".png"))),
+                os.path.join(__write_root_loc__, os.path.basename(fname).replace(".txt", ""),
+                             str(i_subFile) + "." + os.path.basename(fname).replace(".txt", ".png"))),
                 sliced_df.iloc[toRow - 1]['Action'],
                 sliced_df.iloc[toRow - 1]['Close']]
 
