@@ -124,11 +124,11 @@ for path, subdirs, files in os.walk(__read_location__):
         model.compile(optimizer=OPTIMIZER, loss="mean_squared_error", metrics=["MAE"])
 
         # Save weights after every epoch
-        if not os.path.exists(os.path.join(__write_location__, "weights")):
-            os.makedirs(os.path.join(__write_location__, "weights"))
+        if not os.path.exists(os.path.join(__write_location__, "weights", stock_name)):
+            os.makedirs(os.path.join(__write_location__, "weights", stock_name))
 
         checkpoint = keras.callbacks.ModelCheckpoint(
-            filepath="weights/weights.{epoch:02d}-{val_loss:.2f}.hdf5",
+            filepath="model/weights/" + stock_name + "/weights.{epoch:02d}-{val_loss:.2f}.hdf5",
             save_weights_only=True,
             period=1,
         )
@@ -141,7 +141,7 @@ for path, subdirs, files in os.walk(__read_location__):
         # TensorBoard
         # how to use: $ tensorboard --logdir path_to_current_dir/Graph
         # Save log for tensorboard
-        LOG_DIR_TENSORBOARD = os.path.join(__write_location__, "tensorboard")
+        LOG_DIR_TENSORBOARD = os.path.join(__write_location__, "tensorboard", stock_name)
         if not os.path.exists(LOG_DIR_TENSORBOARD):
             os.makedirs(LOG_DIR_TENSORBOARD)
 
