@@ -2,11 +2,12 @@
 import math
 import os
 
+import cv2
 import h5py
 import numpy as np
 import pandas as pd
-from keras.preprocessing import image
 from progress_bar import updateProgress
+from scipy import misc
 
 # Directory of dataset to use
 TRAIN_DIR = "augmented_data"
@@ -19,14 +20,11 @@ img_file = ""
 
 def processImage(img_path):
     # Read and resize image
-    img = image.load_img(img_path, target_size=(224, 224))
-    x = image.img_to_array(img)
-    x = np.expand_dims(x, axis=0)
+    img = cv2.imread(img_path, cv2.IMREAD_COLOR)
+    img = cv2.resize(img, (224, 224))
 
     # Convert the image into an 8 bit array
-    # return np.asarray(img, dtype=np.float32)
-
-    return x
+    return np.asarray(img, dtype=np.float32)
 
 
 def loadDataSet(folder_path):
