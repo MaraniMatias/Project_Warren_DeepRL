@@ -1,11 +1,11 @@
 import glob
 import math
 import os
-import sys
 
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+from progress_bar import updateProgress
 
 
 def tabulate(x, y, f):
@@ -38,34 +38,6 @@ def gramian_angular_field(series):
     gaf = tabulate(phi, phi, cos_sum)
 
     return gaf, phi, r, scaled_series
-
-
-# Show a progress bar
-def updateProgress(progress, tick="", total="", status="Loading..."):
-    lineLength = 80
-    barLength = 23
-    if isinstance(progress, int):
-        progress = float(progress)
-    if progress < 0:
-        progress = 0
-        status = "Waiting...\r"
-    if progress >= 1:
-        progress = 1
-        status = "Completed loading data\r\n"
-    block = int(round(barLength * progress))
-    line = str("\rImage: {0}/{1} [{2}] {3}% {4}").format(
-        tick,
-        total,
-        str(("#" * block)) + str("." * (barLength - block)),
-        round(progress * 100, 1),
-        status,
-    )
-    emptyBlock = lineLength - len(line)
-    emptyBlock = " " * emptyBlock if emptyBlock > 0 else ""
-    sys.stdout.write(line + emptyBlock)
-    sys.stdout.flush()
-    if progress == 1:
-        print("")
 
 
 # making sure writing directories exist
