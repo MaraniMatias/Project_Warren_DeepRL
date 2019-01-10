@@ -1,244 +1,179 @@
-#!/usr/bin/python3
-# ./main.py --load_weight ./weight_file.h5
-
-import argparse
+#!/usr/bin/env python3
 import os
-
-import h5py
-import keras
-import matplotlib.pyplot as plt
+import gym
+import ptan
+import argparse
 import numpy as np
-from keras.applications import InceptionV3, ResNet50, Xception
-from keras.layers import Flatten, Dense, Input, Dropout
-from keras.models import Model
-from keras.optimizers import Adam, RMSprop, Adadelta, Adagrad
-from six.moves import cPickle
 
-# construct the argument parse and parse the arguments
-ap = argparse.ArgumentParser()
-ap.add_argument("-lw", "--load_weights", help="Path to the file weights")
-args = vars(ap.parse_args())
+import torch
+import torch.optim as optim
 
-__read_location__ = os.path.realpath(os.path.join(os.getcwd(), 'pickled_dataset'))
-__write_location__ = os.path.realpath(os.path.join(os.getcwd(), 'model'))
+from lib import environ, data, models, common, validation
 
-# network and training
-EPOCHS = 20
+from tensorboardX import SummaryWriter
+
 BATCH_SIZE = 32
-VERBOSE = 1
-# https://keras.io/optimizers
-OPTIMIZER = Adam(lr=0.001, amsgrad=True)
-# OPTIMIZER = RMSprop()
-# OPTIMIZER = Adadelta(lr=1.0, rho=0.95, epsilon=None, decay=0.0)
-# OPTIMIZER = Adagrad(lr=0.05)
+BARS_COUNT = 10
+TARGET_NET_SYNC = 1000
+DEFAULT_STOCKS = "data/YNDX_160101_161231.csv"
+DEFAULT_VAL_STOCKS = "data/YNDX_150101_151231.csv"
 
-# Image processing layer
-# CNN = 'Xception'
-# CNN = 'IV3'
-CNN = "RN50"
+GAMMA = 0.99
+
+REPLAY_SIZE = 100000
+REPLAY_INITIAL = 10000
+
+REWARD_STEPS = 2
+
+LEARNING_RATE = 0.0001
+
+STATES_TO_EVALUATE = 1000
+EVAL_EVERY_STEP = 1000
+
+EPSILON_START = 1.0
+EPSILON_STOP = 0.1
+EPSILON_STEPS = 1000000
+
+CHECKPOINT_EVERY_STEP = 1000000
+VALIDATION_EVERY_STEP = 100000
 
 
-def readFile(stock_name, part_type, X_img=None, Y_close=None):
-    print("Reading", stock_name, part_type, "data...")
-    file_name = stock_name + "_" + part_type + ".hdf5"
-    with h5py.File(os.path.join(__read_location__, stock_name, file_name), "r+") as f:
-        f_img = f["img"][()]
-        f_close = f["close"][()]
-        f.close()
-    if X_img is None:
-        X_img = f_img
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--cuda", default=False, action="store_true", help="Enable cuda"
+    )
+    parser.add_argument(
+        "--data",
+        default=DEFAULT_STOCKS,
+        help="Stocks file or dir to train on, default=" + DEFAULT_STOCKS,
+    )
+    parser.add_argument(
+        "--year",
+        type=int,
+        help="Year to be used for training, if specified, overrides --data option",
+    )
+    parser.add_argument(
+        "--valdata",
+        default=DEFAULT_VAL_STOCKS,
+        help="Stocks data for validation, default=" + DEFAULT_VAL_STOCKS,
+    )
+    parser.add_argument("-r", "--run", required=True, help="Run name")
+    args = parser.parse_args()
+    device = torch.device("cuda" if args.cuda else "cpu")
+
+    saves_path = os.path.join("saves", args.run)
+    os.makedirs(saves_path, exist_ok=True)
+
+    if args.year is not None or os.path.isfile(args.data):
+        if args.year is not None:
+            stock_data = data.load_year_data(args.year)
+        else:
+            stock_data = {"YNDX": data.load_relative(args.data)}
+        env = environ.StocksEnv(
+            stock_data,
+            bars_count=BARS_COUNT,
+            reset_on_close=True,
+            state_1d=False,
+            volumes=False,
+        )
+        env_tst = environ.StocksEnv(
+            stock_data, bars_count=BARS_COUNT, reset_on_close=True, state_1d=False
+        )
+    elif os.path.isdir(args.data):
+        env = environ.StocksEnv.from_dir(
+            args.data, bars_count=BARS_COUNT, reset_on_close=True, state_1d=False
+        )
+        env_tst = environ.StocksEnv.from_dir(
+            args.data, bars_count=BARS_COUNT, reset_on_close=True, state_1d=False
+        )
     else:
-        X_img = np.concatenate((X_img, f_img), axis=0)
+        raise RuntimeError("No data to train on")
+    env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
 
-    if Y_close is None:
-        Y_close = f_close
-    else:
-        Y_close = np.concatenate((Y_close, f_close), axis=0)
+    val_data = {"YNDX": data.load_relative(args.valdata)}
+    env_val = environ.StocksEnv(
+        val_data, bars_count=BARS_COUNT, reset_on_close=True, state_1d=False
+    )
 
-    return X_img, Y_close
+    writer = SummaryWriter(comment="-simple-" + args.run)
+    net = models.SimpleFFDQN(env.observation_space.shape[0], env.action_space.n).to(
+        device
+    )
+    tgt_net = ptan.agent.TargetNet(net)
+    selector = ptan.actions.EpsilonGreedyActionSelector(EPSILON_START)
+    agent = ptan.agent.DQNAgent(net, selector, device=device)
+    exp_source = ptan.experience.ExperienceSourceFirstLast(
+        env, agent, GAMMA, steps_count=REWARD_STEPS
+    )
+    buffer = ptan.experience.ExperienceReplayBuffer(exp_source, REPLAY_SIZE)
+    optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
 
+    # main training loop
+    step_idx = 0
+    eval_states = None
+    best_mean_val = None
 
-# Load data
-print("...loading training data")
-for path, subdirs, files in os.walk(__read_location__):
-    if len(subdirs) == 0:
-        stock_name = os.path.basename(os.path.normpath(path))
-        img_train, close_train = readFile(stock_name, "train")
-        img_valid, close_valid = readFile(stock_name, "validation")
-        img_test, close_test = readFile(stock_name, "test")
+    with common.RewardTracker(writer, np.inf, group_rewards=100) as reward_tracker:
+        while True:
+            step_idx += 1
+            buffer.populate(1)
+            selector.epsilon = max(
+                EPSILON_STOP, EPSILON_START - step_idx / EPSILON_STEPS
+            )
 
-        print("img_train shape:", img_train.shape)
-        print("close_train shape:", close_train.shape)
-        print("img_valid shape:", img_valid.shape)
-        print("close_valid shape:", close_valid.shape)
-        print("img_test shape:", img_test.shape)
-        print("v shape:", close_test.shape)
+            new_rewards = exp_source.pop_rewards_steps()
+            if new_rewards:
+                reward_tracker.reward(new_rewards[0], step_idx, selector.epsilon)
 
-        # First we need to create a model structure
-        # input layer
-        image_input = Input(shape=img_train.shape[1:], name="image_input")
+            if len(buffer) < REPLAY_INITIAL:
+                continue
 
-        if CNN == "IV3":
-            # Inception V3 layer with pre-trained weights from ImageNet
-            # base_iv3_model = InceptionV3(include_top=False, weights="imagenet")
-            base_iv3_model = InceptionV3(weights="imagenet")
-            # Inception V3 output from input layer
-            x = base_iv3_model(image_input)
-            # flattening it #why?
-            # flat_iv3 = Flatten()(output_vgg16)
-        elif CNN == "RN50":
-            # ResNet50 layer with pre-trained weights from ImageNet
-            base_rn50_model = ResNet50(weights="imagenet")
-            # ResNet50 output from input layer
-            x = base_rn50_model(image_input)
-        elif CNN == "Xception":
-            # Xception layer with pre-trained weights from ImageNet
-            base_xp_model = Xception(weights="imagenet")
-            # Xception output from input layer
-            x = base_xp_model(image_input)
+            if eval_states is None:
+                print("Initial buffer populated, start training")
+                eval_states = buffer.sample(STATES_TO_EVALUATE)
+                eval_states = [
+                    np.array(transition.state, copy=False) for transition in eval_states
+                ]
+                eval_states = np.array(eval_states, copy=False)
 
-        # We stack dense layers and dropout layers to avoid overfitting after that
-        x = Dense(1000, activation="relu")(x)
-        x = Dropout(0.2)(x)
-        x = Dense(1000, activation="relu")(x)
-        x = Dropout(0.2)(x)
-        x = Dense(240, activation="relu")(x)
-        # x = Dropout(0.1)(x)
+            if step_idx % EVAL_EVERY_STEP == 0:
+                mean_val = common.calc_values_of_states(eval_states, net, device=device)
+                writer.add_scalar("values_mean", mean_val, step_idx)
+                if best_mean_val is None or best_mean_val < mean_val:
+                    if best_mean_val is not None:
+                        print(
+                            "%d: Best mean value updated %.3f -> %.3f"
+                            % (step_idx, best_mean_val, mean_val)
+                        )
+                    best_mean_val = mean_val
+                    torch.save(
+                        net.state_dict(),
+                        os.path.join(saves_path, "mean_val-%.3f.data" % mean_val),
+                    )
 
-        # and the final prediction layer as output
-        # predictions = Dense(1, activation='sigmoid', name='predictions')(x)
-        predictions = Dense(1)(x)
+            optimizer.zero_grad()
+            batch = buffer.sample(BATCH_SIZE)
+            loss_v = common.calc_loss(
+                batch, net, tgt_net.target_model, GAMMA ** REWARD_STEPS, device=device
+            )
+            loss_v.backward()
+            optimizer.step()
 
-        # Now that we have created a model structure we can define it
-        # this defines the model with one input and one output
-        model = Model(inputs=[image_input], outputs=predictions)
+            if step_idx % TARGET_NET_SYNC == 0:
+                tgt_net.sync()
 
-        # printing a model summary to check what we constructed
-        print(model.summary())
+            if step_idx % CHECKPOINT_EVERY_STEP == 0:
+                idx = step_idx // CHECKPOINT_EVERY_STEP
+                torch.save(
+                    net.state_dict(),
+                    os.path.join(saves_path, "checkpoint-%3d.data" % idx),
+                )
 
-        # Load weight
-        if args["load_weights"] != None:
-            print("Loading weights for", args["load_weights"])
-            model.load_weights(args["load_weights"])
-
-        model.compile(optimizer=OPTIMIZER, loss="mean_squared_error", metrics=["MAE"])
-
-        # Save weights after every epoch
-        if not os.path.exists(os.path.join(__write_location__, "weights", stock_name)):
-            os.makedirs(os.path.join(__write_location__, "weights", stock_name))
-
-        checkpoint = keras.callbacks.ModelCheckpoint(
-            filepath="model/weights/" + stock_name + "/weights.{epoch:02d}-{val_loss:.2f}.hdf5",
-            save_weights_only=True,
-            period=1,
-        )
-
-        # Reduce learning rate
-        reduceLROnPlat = keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss", factor=0.8, patience=3, verbose=1, min_lr=0.0001
-        )
-
-        # TensorBoard
-        # how to use: $ tensorboard --logdir path_to_current_dir/Graph
-        # Save log for tensorboard
-        LOG_DIR_TENSORBOARD = os.path.join(__write_location__, "tensorboard", stock_name)
-        if not os.path.exists(LOG_DIR_TENSORBOARD):
-            os.makedirs(LOG_DIR_TENSORBOARD)
-
-        tbCallBack = keras.callbacks.TensorBoard(
-            log_dir=LOG_DIR_TENSORBOARD,
-            batch_size=BATCH_SIZE,
-            histogram_freq=0,
-            write_graph=True,
-            write_images=True,
-        )
-        print("tensorboard --logdir", LOG_DIR_TENSORBOARD)
-
-        # Path to save model
-        PATH_SAVE_MODEL = os.path.join(__write_location__, "model_backup", stock_name)
-
-        # Save weights after every epoch
-        if not os.path.exists(PATH_SAVE_MODEL):
-            os.makedirs(PATH_SAVE_MODEL)
-
-        csv_logger = keras.callbacks.CSVLogger(os.path.join(PATH_SAVE_MODEL, "training.csv"))
-
-        history = model.fit(
-            [img_train],
-            [close_train],
-            batch_size=BATCH_SIZE,
-            epochs=EPOCHS,
-            verbose=VERBOSE,
-            validation_data=([img_valid], [close_valid]),
-            callbacks=[tbCallBack, checkpoint, reduceLROnPlat, csv_logger],
-        )
-
-        # serialize model to YAML
-        model_yaml = model.to_yaml()
-        with open(os.path.join(PATH_SAVE_MODEL, "model.yaml"), "w") as yaml_file:
-            yaml_file.write(model_yaml)
-        # serialize weights to HDF5
-        model.save_weights(os.path.join(PATH_SAVE_MODEL, "model.h5"))
-        print("Saved model to disk")
-
-        score = model.evaluate([img_test], close_test, batch_size=BATCH_SIZE, verbose=VERBOSE)
-
-        print("\nTest loss:", score[0])
-        print("Test MAE:", score[1])
-        # print("Test accuracy:", score[2])
-
-        # Save all data in history
-        with open(os.path.join(PATH_SAVE_MODEL, "history.pkl"), "wb") as f:
-            cPickle.dump(history.history, f)
-        f.close()
-
-        # list all data in history
-        print(history.history.keys())
-
-        # plot the training loss and accuracy
-        plt.style.use("ggplot")
-        plt.figure()
-
-        plt.plot(history.history["loss"], label="loss")
-        plt.plot(history.history["val_loss"], label="val_loss")
-        plt.title("Training Loss")
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.legend(["train", "test"], loc="upper left")
-        plt.savefig(os.path.join(PATH_SAVE_MODEL, "history_loss.png"))
-        plt.close()
-
-        plt.plot(history.history["mean_absolute_error"], label="mean")
-        plt.plot(history.history["val_mean_absolute_error"], label="val_mean")
-        plt.title("Training Absolute Error")
-        plt.xlabel("Epoch")
-        plt.ylabel("Absolute Error")
-        plt.legend(["train", "test"], loc="upper left")
-        plt.savefig(os.path.join(PATH_SAVE_MODEL, "history_mean.png"))
-        plt.close()
-
-        # summarize history for loss
-        plt.plot(history.history["loss"], label="train_loss")
-        plt.plot(history.history["val_loss"], label="val_loss")
-        plt.title("model loss")
-        plt.ylabel("Loss")
-        plt.xlabel("Epoch")
-        plt.legend(["train", "test"], loc="upper left")
-        plt.show()
-
-        # summarize history for mean
-        plt.plot(history.history["mean_absolute_error"], label="mean")
-        plt.plot(history.history["val_mean_absolute_error"], label="val_mean")
-        plt.title("Training Absolute Error")
-        plt.xlabel("Epoch")
-        plt.ylabel("Absolute Error")
-        plt.legend(["train", "test"], loc="upper left")
-        plt.show()
-
-        # Reduce learning rate
-        plt.plot(history.history["lr"], label="Reduce learning rate")
-        plt.title("Reduce learning rate")
-        plt.xlabel("Epoch")
-        plt.ylabel("Reduce learning rate")
-        plt.legend(loc="upper left")
-        plt.show()
+            if step_idx % VALIDATION_EVERY_STEP == 0:
+                res = validation.validation_run(env_tst, net, device=device)
+                for key, val in res.items():
+                    writer.add_scalar(key + "_test", val, step_idx)
+                res = validation.validation_run(env_val, net, device=device)
+                for key, val in res.items():
+                    writer.add_scalar(key + "_val", val, step_idx)

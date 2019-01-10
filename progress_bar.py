@@ -1,6 +1,5 @@
 import sys
 
-
 # Show a progress bar
 def updateProgress(progress, tick="", total="", status="Loading..."):
     line_length = 80
